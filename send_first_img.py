@@ -51,17 +51,31 @@ def get_all_items(url: str) -> List[Tuple[str, str]]:
     return items
 
 
-def download_image_bytes(session: requests.Session, image_url: str) -> bytes:
+def download_image_bytes(session: requests.Session, image_url: str) -> Tuple[bytes, str]:
+    """Download the image and return (bytes, filename).
+
+    The filename is derived from the URL path or falls back to 'file'.
+    """
     resp = session.get(image_url, timeout=20)
     resp.raise_for_status()
-    return resp.content
+    content = resp.content
+    # try to derive filename from URL
+    try:
+        from urllib.parse import urlparse, unquote
+
+        path = urlparse(image_url).path
+        name = unquote(path.split("/")[-1]) or "file"
+    except Exception:
+        name = "file"
+    return content, name
 
 
-def send_photo_telegram(session: requests.Session, bot_token: str, chat_id: str, image_bytes: bytes, caption: str):
-    api = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-    files = {"photo": ("image.jpg", image_bytes)}
+def send_document_telegram(session: requests.Session, bot_token: str, chat_id: str, file_bytes: bytes, filename: str, caption: str):
+    """Send a file as document via Telegram sendDocument API."""
+    api = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+    files = {"document": (filename, file_bytes)}
     data = {"chat_id": chat_id, "caption": caption}
-    resp = session.post(api, data=data, files=files, timeout=30)
+    resp = session.post(api, data=data, files=files, timeout=60)
     resp.raise_for_status()
     return resp.json()
 
@@ -90,15 +104,15 @@ def main():
     for idx, (image_url, caption) in enumerate(items, start=1):
         print(f"[{idx}/{len(items)}] Processing: {image_url}")
         try:
-            image_bytes = download_image_bytes(session, image_url)
+            file_bytes, filename = download_image_bytes(session, image_url)
         except Exception as e:
             print(f"  Error downloading image: {e}")
             continue
 
         try:
-            res = send_photo_telegram(session, token, chat_id, image_bytes, caption)
+            res = send_document_telegram(session, token, chat_id, file_bytes, filename, caption)
             ok = res.get("ok")
-            print(f"  Sent, ok={ok}")
+            print(f"  Sent as document '{filename}', ok={ok}")
             sent += 1
         except Exception as e:
             print(f"  Error sending to Telegram: {e}")
