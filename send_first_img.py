@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Fetch the first item image from the Nogizaka46 shop category page and send it to a Telegram chat.
+"""Fetch all item images from the Nogizaka46 shop category page and send them to a Telegram chat.
 
 Usage:
-  Set environment variables TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID then run:
-    python send_first_img.py
+    Set environment variables TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID then run:
+        python send_first_img.py
 
 Notes:
-  - TELEGRAM_CHAT_ID can be a group chat id (negative number) or channel id.
-  - The script finds the first <div id="item_..."> on the page, extracts the <img> src and the <dd> caption.
+    - `TELEGRAM_CHAT_ID` can be a group chat id (negative number) or channel id.
+    - The script finds all `<div id="item_...">` blocks on the page, extracts each `<img>` src and the `<dd>` caption,
+        downloads each image, and sends them one-by-one to Telegram.
+    - Optional env var `TELEGRAM_DELAY_SECONDS` (default 1) controls delay between sends to avoid rate limits.
 """
 import os
 import re
 import sys
-from typing import Tuple
+from typing import List, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,48 +22,46 @@ from bs4 import BeautifulSoup
 URL = "https://www.nogizaka46shop.com/category/426"
 
 
-def get_first_item(url: str) -> Tuple[str, str]:
-    """Return (image_url, caption) for the first item div on the page.
+def get_all_items(url: str) -> List[Tuple[str, str]]:
+    """Return list of (image_url, caption) for all item divs on the page.
 
-    Raises RuntimeError if not found or on network errors.
+    Returns an empty list if none found.
     """
-    resp = requests.get(url, timeout=15)
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; send_first_img/1.0)"}
+    resp = requests.get(url, timeout=15, headers=headers)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    div = soup.find("div", id=re.compile(r"^item_\d+"))
-    if not div:
-        raise RuntimeError("No item div found on the page")
+    items = []
+    for div in soup.find_all("div", id=re.compile(r"^item_\d+")):
+        img = div.find("img")
+        if not img or not img.get("src"):
+            continue
+        src = img["src"].strip()
+        # Normalize protocol-relative URLs
+        if src.startswith("//"):
+            src = "https:" + src
+        elif src.startswith("/"):
+            src = requests.compat.urljoin(url, src)
 
-    img = div.find("img")
-    if not img or not img.get("src"):
-        raise RuntimeError("No image tag found in the first item div")
+        dd = div.find("dd")
+        caption = dd.get_text(strip=True) if dd else ""
+        items.append((src, caption))
 
-    src = img["src"].strip()
-    # Normalize protocol-relative URLs
-    if src.startswith("//"):
-        src = "https:" + src
-    elif src.startswith("/"):
-        # Make absolute
-        src = requests.compat.urljoin(url, src)
-
-    dd = div.find("dd")
-    caption = dd.get_text(strip=True) if dd else ""
-
-    return src, caption
+    return items
 
 
-def download_image_bytes(image_url: str) -> bytes:
-    resp = requests.get(image_url, timeout=20)
+def download_image_bytes(session: requests.Session, image_url: str) -> bytes:
+    resp = session.get(image_url, timeout=20)
     resp.raise_for_status()
     return resp.content
 
 
-def send_photo_telegram(bot_token: str, chat_id: str, image_bytes: bytes, caption: str):
+def send_photo_telegram(session: requests.Session, bot_token: str, chat_id: str, image_bytes: bytes, caption: str):
     api = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
     files = {"photo": ("image.jpg", image_bytes)}
     data = {"chat_id": chat_id, "caption": caption}
-    resp = requests.post(api, data=data, files=files, timeout=30)
+    resp = session.post(api, data=data, files=files, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -74,28 +74,45 @@ def main():
         sys.exit(2)
 
     try:
-        image_url, caption = get_first_item(URL)
+        items = get_all_items(URL)
     except Exception as e:
         print("Error fetching/parsing page:", e)
         sys.exit(1)
 
-    print("Found image:", image_url)
-    print("Caption:", caption)
+    if not items:
+        print("No items found on the page.")
+        sys.exit(0)
 
-    try:
-        image_bytes = download_image_bytes(image_url)
-    except Exception as e:
-        print("Error downloading image:", e)
-        sys.exit(1)
+    delay = float(os.getenv("TELEGRAM_DELAY_SECONDS", "1"))
 
-    try:
-        res = send_photo_telegram(token, chat_id, image_bytes, caption)
-    except Exception as e:
-        print("Error sending to Telegram:", e)
-        sys.exit(1)
+    session = requests.Session()
+    sent = 0
+    for idx, (image_url, caption) in enumerate(items, start=1):
+        print(f"[{idx}/{len(items)}] Processing: {image_url}")
+        try:
+            image_bytes = download_image_bytes(session, image_url)
+        except Exception as e:
+            print(f"  Error downloading image: {e}")
+            continue
 
-    ok = res.get("ok")
-    print("Telegram API returned ok=", ok)
+        try:
+            res = send_photo_telegram(session, token, chat_id, image_bytes, caption)
+            ok = res.get("ok")
+            print(f"  Sent, ok={ok}")
+            sent += 1
+        except Exception as e:
+            print(f"  Error sending to Telegram: {e}")
+            # continue to next image
+
+        # polite delay to avoid hitting rate limits
+        try:
+            import time
+
+            time.sleep(delay)
+        except Exception:
+            pass
+
+    print(f"Done. Sent {sent}/{len(items)} images.")
 
 
 if __name__ == "__main__":
