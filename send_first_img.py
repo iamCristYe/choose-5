@@ -67,6 +67,12 @@ def download_image_bytes(session: requests.Session, image_url: str) -> Tuple[byt
         name = unquote(path.split("/")[-1]) or "file"
     except Exception:
         name = "file"
+
+    # Ensure filename has an image extension for Telegram; append .jpg when missing
+    lower = name.lower()
+    if not lower.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
+        name = name + ".jpg"
+
     return content, name
 
 
@@ -114,6 +120,13 @@ def main():
             ok = res.get("ok")
             print(f"  Sent as document '{filename}', ok={ok}")
             sent += 1
+            # extra pause after sending to be polite to Telegram
+            try:
+                import time
+
+                time.sleep(3)
+            except Exception:
+                pass
         except Exception as e:
             print(f"  Error sending to Telegram: {e}")
             # continue to next image
