@@ -88,7 +88,7 @@ def send_photo_telegram(session: requests.Session, bot_token: str, chat_id: str,
 
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    chat_id = "-1001495758961"#os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         print("Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables.")
         sys.exit(2)
