@@ -80,7 +80,7 @@ def send_photo_telegram(session: requests.Session, bot_token: str, chat_id: str,
     """Send a file as photo via Telegram sendPhoto API."""
     api = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
     files = {"photo": (filename, file_bytes)}
-    data = {"chat_id": chat_id, "caption": caption}
+    data = {"chat_id": chat_id, "caption": caption, "message_thread_id": "441"}
     resp = session.post(api, data=data, files=files, timeout=60)
     resp.raise_for_status()
     return resp.json()
@@ -88,7 +88,7 @@ def send_photo_telegram(session: requests.Session, bot_token: str, chat_id: str,
 
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = "-1001495758961"#os.getenv("TELEGRAM_CHAT_ID")
+    chat_id = "-1002646331785"#os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         print("Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables.")
         sys.exit(2)
